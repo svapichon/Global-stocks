@@ -1,0 +1,101 @@
+library(dplyr)
+library(rvest)
+library(stringr)
+library(purrr)
+
+get_PEratio <- function(PEratio_link){
+    PEratio_page <- read_html(PEratio_link)
+    number <- PEratio_page %>% 
+        html_nodes(".background-ya") %>% 
+        html_text()
+    return(number)
+}
+get_category <- function(PEratio_link){
+    PEratio_page <- read_html(PEratio_link)
+    number <- PEratio_page %>% 
+        html_nodes(".category-badge") %>% 
+        html_text() %>% 
+        paste(collapse = ",") %>%
+        gsub("[^\x01-\x7F]", "", .) %>% # Remove non-ASCII characters
+        str_replace_all("\n", "") %>% # Remove special characters
+        str_trim() # Remove end spaces
+    return(number)
+}
+get_oneDay <- function(PEratio_link){
+    PEratio_page <- read_html(PEratio_link)
+    number <- PEratio_page %>% 
+        html_nodes("div.line1") %>% 
+        html_text()
+    return(number[[5]])
+}
+get_yoy <- function(PEratio_link){
+    PEratio_page <- read_html(PEratio_link)
+    number <- PEratio_page %>% 
+        html_nodes("div.line1") %>% 
+        html_text() 
+    return(number[[6]])
+}
+
+globalStocks <- data.frame()
+
+for(page_result in seq(from = 1, to = 2)){
+    link <- paste0("https://companiesmarketcap.com/page/", 
+                   page_result, "/")
+    page <- read_html(link)
+    
+    company <- page %>% 
+        html_nodes(".company-name") %>%
+        html_text()
+    ticker <- page %>% 
+        html_nodes("div.company-code") %>% 
+        html_text()
+    marketCap <- page %>% 
+        html_nodes(".name-td+ .td-right") %>% 
+        html_text()
+    price <- page %>% 
+        html_nodes(".td-right+ .td-right") %>% 
+        html_text()
+    country <- page %>% 
+        html_nodes(".responsive-hidden") %>% 
+        html_text()
+    country2 <- data.frame(country)
+    country2 <- country2[-c(1:3), ] # Remove errors in first 3 rows
+    
+    PEratio_link <- page %>% 
+        html_nodes("div.name-div > a") %>% 
+        html_attr("href") %>% 
+        paste0("https://companiesmarketcap.com", .) %>% 
+        gsub("/marketcap", "/pe-ratio", .)
+    
+    # Use PEratio <- sapply(PEratio_link, FUN = get_PEratio, USE.NAMES = F)
+    # Or use map() if Error in open.connection(x, "rb") : HTTP error 404.
+    PEratio_possibly <- possibly(get_PEratio, otherwise = "This page could not be accessed.")
+    PEratio <- map(PEratio_link, PEratio_possibly)
+    PEratio2 <- as.numeric(PEratio) # Coerce list into numeric vector
+    category_possibly <- possibly(get_category, otherwise = "This page could not be accessed.")
+    category <- map(PEratio_link, category_possibly)
+    category2 <- as.character(category) # Coerce list into character vector
+    oneDay_possibly <- possibly(get_oneDay, otherwise = "This page could not be accessed.")
+    oneDay <- map(PEratio_link, oneDay_possibly)
+    oneDay2 <- as.character(oneDay) # Coerce list into character vector
+    yoy_possibly <- possibly(get_yoy, otherwise = "This page could not be accessed.")
+    yoy <- map(PEratio_link, yoy_possibly)
+    yoy2 <- as.character(yoy) # Coerce list into character vector
+    
+    globalStocks <- rbind(globalStocks, data.frame(company, ticker, marketCap, oneDay2, yoy2, price,
+                                                   PEratio2, country2, category2,
+                                                   stringsAsFactors = F))
+    
+    print(paste("Page", page_result)) # For tracking pages when running
+}
+
+globalStocks2 <- globalStocks %>% 
+    rename(Company = company, Ticker = ticker, "Market Cap" = marketCap, 
+           "One-day" = oneDay2, "One-year" = yoy2, Price = price, 
+           "PE ratio" = PEratio2, Country = country2, Category = category2)
+
+head(globalStocks2)
+
+write.csv(globalStocks2, "Global Stocks.csv")
+
+
